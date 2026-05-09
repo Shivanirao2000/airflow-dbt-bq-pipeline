@@ -1,0 +1,21 @@
+nyc_taxi_project:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: airflow-dbt-pipeline-shivani
+      dataset: nyc_taxi_analytics
+      keyfile: /Users/shivanirao/airflow-dbt-bq-pipeline/infra/gcp-keyfile.json
+      threads: 4
+      job_execution_timeout_seconds: 300
+      location: US
+    prod:
+      type: bigquery
+      method: service-account
+      project: airflow-dbt-pipeline-shivani
+      dataset: nyc_taxi_analytics
+      keyfile: /opt/airflow/keys/gcp-keyfile.json
+      threads: 4
+      job_execution_timeout_seconds: 300
+      location: US

@@ -1,0 +1,141 @@
+version: '3.8'
+
+# ---------------------------------------------------------------------------
+# Shared configuration applied to every Airflow service via YAML anchor.
+# Override individual keys in each service block as needed.
+# ---------------------------------------------------------------------------
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.7.0
+  env_file:
+    - .env
+  environment: &airflow-common-env
+    # ---- Core ----
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
+
+    # ---- Database ----
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+      postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+
+    # ---- Webserver ----
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'false'
+
+    # ---- API ----
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+
+    # ---- Logging ----
+    AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+    AIRFLOW__LOGGING__LOG_FETCH_TIMEOUT_SEC: '30'
+
+    # ---- GCP / BigQuery connection ----
+    # The google_cloud_default connection is picked up automatically by
+    # GoogleCloudBaseHook when AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT is set.
+    AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT: >-
+      google-cloud-platform://?key_path=%2Fopt%2Fairflow%2Fkeys%2Fgcp-keyfile.json&project=${GCP_PROJECT_ID}&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/keys/gcp-keyfile.json
+    GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+    GCP_REGION: ${GCP_REGION}
+
+    # ---- dbt ----
+    DBT_PROFILES_DIR: /opt/airflow/dbt
+    DBT_TARGET: ${DBT_TARGET:-prod}
+    DBT_KEYFILE_PATH: ${DBT_KEYFILE_PATH:-/opt/airflow/keys/gcp-keyfile.json}
+
+  volumes:
+    # DAGs, logs, plugins — mounted from repo so changes are picked up live
+    - ../airflow/dags:/opt/airflow/dags
+    - ../airflow/logs:/opt/airflow/logs
+    - ../airflow/plugins:/opt/airflow/plugins
+    # dbt project shared into the Airflow container
+    - ../dbt:/opt/airflow/dbt
+    # Ingestion scripts invoked by the DAG via BashOperator
+    - ../scripts:/opt/airflow/scripts
+    # GCP service-account key (read-only)
+    - ${GCP_KEYFILE_PATH}:/opt/airflow/keys/gcp-keyfile.json:ro
+
+  user: "${AIRFLOW_UID:-50000}:0"
+
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+services:
+
+  # ---------- Metadata database ----------
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"   # expose for local inspection; remove in production
+
+  # ---------- One-shot DB migration + admin user creation ----------
+  airflow-init:
+    <<: *airflow-common
+    # Runs once, exits 0 when done; other services wait on it indirectly via
+    # the postgres healthcheck. Run manually: docker compose run airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db upgrade
+        airflow users create \
+          --username "${_AIRFLOW_WWW_USER_USERNAME:-admin}" \
+          --password "${_AIRFLOW_WWW_USER_PASSWORD:-admin}" \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email "${_AIRFLOW_WWW_USER_EMAIL:-admin@example.com}"
+    restart: "no"
+
+  # ---------- Webserver ----------
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+  # ---------- Scheduler (drives LocalExecutor task execution) ----------
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $(hostname)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+
+# ---------------------------------------------------------------------------
+# Named volumes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres-db-volume:

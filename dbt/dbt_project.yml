@@ -1,0 +1,52 @@
+name: 'nyc_taxi_project'
+version: '1.0.0'
+config-version: 2
+
+# Must match the top-level key in profiles.yml.
+profile: 'nyc_taxi_project'
+
+# ---------------------------------------------------------------------------
+# Path configuration
+# ---------------------------------------------------------------------------
+model-paths:    ["models"]
+analysis-paths: ["analyses"]
+test-paths:     ["tests"]
+seed-paths:     ["seeds"]
+macro-paths:    ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# ---------------------------------------------------------------------------
+# Model materializations and configuration
+# ---------------------------------------------------------------------------
+models:
+  nyc_taxi_project:
+
+    staging:
+      +materialized: view
+      +schema: nyc_taxi_analytics
+      +tags:
+        - staging
+
+    marts:
+      +materialized: table
+      +schema: nyc_taxi_analytics
+      +tags:
+        - marts
+# ---------------------------------------------------------------------------
+# Seed configuration
+# ---------------------------------------------------------------------------
+seeds:
+  nyc_taxi_project:
+    +schema: seeds
+
+# ---------------------------------------------------------------------------
+# Snapshot configuration
+# ---------------------------------------------------------------------------
+snapshots:
+  nyc_taxi_project:
+    +target_schema: snapshots

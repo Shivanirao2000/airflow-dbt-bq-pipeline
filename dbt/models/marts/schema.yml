@@ -1,0 +1,77 @@
+version: 2
+
+models:
+
+  - name: mart_daily_taxi_summary
+    description: >
+      Daily trip summary aggregated by pickup date and pickup location.
+      Grain: one row per (pickup_date, pickup_location_id).
+      Materialized as a partitioned, clustered BigQuery table for efficient
+      date-range and location-filtered queries.
+      Source: stg_yellow_trips (invalid trips already filtered upstream).
+    columns:
+
+      # --- Grain ---
+      - name: pickup_date
+        description: "Calendar date derived from pickup_datetime. Partition key."
+        tests:
+          - not_null
+
+      - name: pickup_location_id
+        description: "TLC Taxi Zone ID where trips originated. Cluster key."
+        tests:
+          - not_null
+
+      # --- Volume ---
+      - name: total_trips
+        description: "Number of completed, valid trips for this date and location."
+        tests:
+          - not_null
+
+      - name: total_passengers
+        description: "Sum of passenger_count across all trips (driver-entered; treat as approximate)."
+        tests:
+          - not_null
+
+      # --- Revenue ---
+      - name: total_revenue
+        description: "Sum of total_amount across all trips (excludes cash tips)."
+        tests:
+          - not_null
+
+      - name: total_tips
+        description: "Sum of tip_amount. Covers credit card tips only; cash tips are not captured."
+        tests:
+          - not_null
+
+      - name: avg_tip_ratio
+        description: >
+          Average of (tip_amount / fare_amount) per trip. Rounded to 4 decimal places.
+          NULL-safe: fare_amount = 0 trips are excluded from the ratio via NULLIF.
+
+      # --- Averages ---
+      - name: avg_fare
+        description: "Average meter fare in USD, rounded to 2 decimal places."
+        tests:
+          - not_null
+
+      - name: avg_trip_distance
+        description: "Average trip distance in miles, rounded to 2 decimal places."
+        tests:
+          - not_null
+
+      - name: avg_trip_duration_minutes
+        description: "Average trip duration in minutes, rounded to 1 decimal place."
+        tests:
+          - not_null
+
+      # --- Payment breakdown ---
+      - name: credit_card_trips
+        description: "Count of trips paid by credit card (payment_type = 1)."
+        tests:
+          - not_null
+
+      - name: cash_trips
+        description: "Count of trips paid in cash (payment_type = 2)."
+        tests:
+          - not_null
