@@ -19,7 +19,7 @@ renamed_and_cast as (
         cast(tpep_dropoff_datetime as timestamp) as dropoff_datetime,
 
         -- trip details
-        cast(passenger_count   as integer)  as passenger_count,
+        coalesce(cast(passenger_count as integer), 1) as passenger_count,
         cast(trip_distance     as numeric)  as trip_distance,
         store_and_fwd_flag,
 
